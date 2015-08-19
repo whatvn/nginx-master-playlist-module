@@ -1,0 +1,6 @@
+CORE_LIBS="$CORE_LIBS -I /data/include -L /data/lib -lswresample -lavformat -lavcodec -lavutil -lavcodec -lavresample -lavfilter -lrt -lswscale -lz -lm -lbz2 -lfdk-aac
+    /data/lib/libavcodec.a  /data/lib/libavdevice.a  /data/lib/libavfilter.a  /data/lib/libavformat.a  /data/lib/libavresample.a  /data/lib/libavutil.a  /data/lib/libpostproc.a  /data/lib/libswresample.a  /data/lib/libswscale.a /data/lib/libx264.a /data/lib/libfdk-aac.a"
+ngx_addon_name=ngx_http_vod_master_playlist_module
+HTTP_AUX_FILTER_MODULES="$HTTP_AUX_FILTER_MODULES ngx_http_vod_master_playlist_module"
+CFLAGS="$CFLAGS -ggdb -D_DEBUG -D_LARGEFILE_SOURCE"
+NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/src/ngx_http_hello_world_module.c"
