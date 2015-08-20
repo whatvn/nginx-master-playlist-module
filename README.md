@@ -26,19 +26,22 @@ result:
 ```
 	#EXTM3U
 	#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=1560000,RESOLUTION=640x360,CODECS="mp4a.40.2, avc1.4d4015"
-	http:/localhost/hlsstreaming/test_360.mp4/index.m3u8
+	http://localhost/hlsstreaming/test_360.mp4/index.m3u8
 	#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=3120000,RESOLUTION=854x480,CODECS="mp4a.40.2, avc1.4d4015"
-	http:/localhost/hlsstreaming/test_480.mp4/index.m3u8
+	http://localhost/hlsstreaming/test_480.mp4/index.m3u8
 	#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=5120000,RESOLUTION=1280x720,CODECS="mp4a.40.2, avc1.4d4015"
-	http:/localhost/hlsstreaming/test.mp4/index.m3u8	
+	http://localhost/hlsstreaming/test.mp4/index.m3u8	
 ```
 
 # Directive
 
 
 `vod_master_playlist` : enable this module
+
 `vod_location` : location where you configure your vod in nginx
+
 `vod_host`: your domain name
+
 `playlist_type`: hls, dash, mss, hds, default is hls  *and it's currently only support hls
 
 
