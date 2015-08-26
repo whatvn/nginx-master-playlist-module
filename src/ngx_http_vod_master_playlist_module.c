@@ -9,12 +9,12 @@
 
 
 
-static const char* HLS =  "hls";
+static const char* HLS = "hls";
 static const char* DASH = "dash";
 //static const char* HDS = "hds";
 
 static const char *resolution[] = {
-    "", "720",
+    "720",
     "480", "360"
 };
 static char *ngx_http_vod_playlist(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
@@ -109,13 +109,6 @@ static char *ngx_http_vod_master_playlist_merge_conf(ngx_conf_t *cf, void *paren
     ngx_conf_merge_str_value(conf->vod_location, prev->vod_location, "vod");
     ngx_conf_merge_str_value(conf->playlist_type, prev->playlist_type, "hls");
     ngx_conf_merge_str_value(conf->vod_host, prev->vod_host, "localhost");
-
-
-    //    if (ngx_strcmp(conf->vod_location.data, "")  || ngx_strcmp(conf->vod_host.data, "")) {
-    //        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-    //                "vod location must be specified");
-    //        return NGX_CONF_ERROR;
-    //    }
     return NGX_CONF_OK;
 }
 
@@ -142,7 +135,6 @@ int ngx_http_vod_playlist_check_file_exist(ngx_str_t path,
     char *strs[] = {fullpath, "_", size, ".mp4"};
 
     strsncat(fullpath, sizeof (fullpath), strs, sizeof (strs) / sizeof (strs[0]));
-    printf("checking path: %s\n", fullpath);
     if (access(fullpath, F_OK) != -1) {
         return NGX_OK;
     }
@@ -183,7 +175,6 @@ extern vod_bucket_t *vod_bucket_init(ngx_http_request_t *r) {
 void vod_bucket_insert(vod_bucket_t *bucket, void const *buf, uint64_t size) {
     ngx_buf_t *b = ngx_pcalloc(bucket->r->pool, sizeof (ngx_buf_t));
     if (b == NULL) return;
-
     b->pos = ngx_pcalloc(bucket->r->pool, size);
     if (b->pos == NULL) return;
 
@@ -237,10 +228,7 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
     }
 
     ngx_log_t * nlog = r->connection->log;
-    struct vod_bucket_t * bucket = vod_bucket_init(r);
-    if (bucket == NULL) {
-        return NGX_HTTP_INTERNAL_SERVER_ERROR;
-    }
+
     // change file name to mp4
     // in order to lookup file in filesystem
     char *ext = strrchr((const char *) path.data, '.');
@@ -309,25 +297,17 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
     char mapped_path[100] = ""; // is it too much, but I dont want to use malloc() here
     ngx_memset(mapped_path, '\0', sizeof (char)*100); /* set all to 0 */
     if (ngx_memcmp(conf->playlist_type.data, DASH, conf->playlist_type.len) == 0) {
-        /* request for mpd file is ".mpd", sizeof is 4*/
-        /*http://cent6/dashstreaming/test3,.mp4,_480.mp4,_360.mp4,.urlset/manifest.mpd*/
         strncpy(mapped_path, (char *) path.data, path.len - 4);
         replace(mapped_path, (char *) clcf->root.data, "");
-        printf("%s\n", mapped_path);
         p = ngx_sprintf(p, "/%s%s,.mp4,", (const char *) conf->vod_location.data, mapped_path);
-        printf("%s\n", (const char *) buffer);
-        for (i = 1; i < 4; i++) {
+        for (i = 0; i < 3; i++) {
             if (ngx_http_vod_playlist_check_file_exist(path, (char *) resolution[i]) == NGX_OK) {
                 p = ngx_sprintf(p, "_%s.mp4,", resolution[i]);
             }
         }
         p = ngx_sprintf(p, ".urlset/manifest.mpd\0");
-//        char test[100] = "";
-//        strcat(test, (char *) buffer);
-//        printf("Test: %s\n", test);
-//        ngx_str_t location = ngx_string(test);
         ngx_str_t location;
-        location.data =  buffer;
+        location.data = buffer;
         location.len = ngx_strlen(buffer);
         ngx_http_internal_redirect(r, &location, &r->args);
         return NGX_HTTP_OK;
@@ -336,7 +316,10 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
     else if (ngx_memcmp(conf->playlist_type.data, HLS, conf->playlist_type.len) == 0) {
         int ret;
         AVFormatContext *fmt_ctx = NULL;
-
+        struct vod_bucket_t * bucket = vod_bucket_init(r);
+        if (bucket == NULL) {
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
         av_register_all();
         if ((ret = avformat_open_input(&fmt_ctx, (const char*) path.data, NULL, NULL)) < 0) {
             if (fmt_ctx) avformat_close_input(&fmt_ctx);
@@ -366,7 +349,6 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
             }
         }
         avformat_close_input(&fmt_ctx);
-
         strncpy(mapped_path, (char *) path.data, path.len - 5);
         replace(mapped_path, (char *) clcf->root.data, "");
         //    mapped_path[path.len - 4] = '\0';
@@ -428,7 +410,7 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
             return rc;
         }
         return ngx_http_output_filter(r, bucket->first);
-    } 
+    }
     return NGX_HTTP_UNSUPPORTED_MEDIA_TYPE;
 }
 
