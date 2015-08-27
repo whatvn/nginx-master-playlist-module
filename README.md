@@ -15,10 +15,10 @@ this thing only works in special environment, so it's not written to work the wa
         }
 ```
 
-then to request master playlist, do this:
+then to request master playlist for file name: test3.mp4, test3_480.mp4, test3_360.mp4 do this:
 
 ```
-$ curl "http:/localhost/test3.m3u8"
+$ curl "http:/localhost/master/test3.m3u8"
 ```
 
 result:
