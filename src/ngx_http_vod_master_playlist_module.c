@@ -234,7 +234,7 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
 
         return rc;
     }
-
+     
 
     if (!of.is_file) {
         if (ngx_close_file(of.fd) == NGX_FILE_ERROR) {
@@ -246,7 +246,7 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
     u_char *buffer = (u_char *) ngx_pcalloc(r->pool, 1024 * 256);
     u_char *p = buffer;
     char mapped_path[200] = ""; // is it too much, but I dont want to use malloc() here
-    ngx_memset(mapped_path, '\0', sizeof (char)*100); /* set all to 0 */
+    ngx_memset(mapped_path, '\0', sizeof (char)*200); /* set all to 0 */
     strncpy(mapped_path, (char *) path.data, path.len - 4);
     replace(mapped_path, (char *) clcf->root.data, "");
     p = ngx_sprintf(p, "/%s%s,.mp4,", (const char *) conf->vod_location.data, mapped_path);
