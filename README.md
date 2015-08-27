@@ -1,6 +1,6 @@
 # nginx-master-playlist-module
 
-this thing only works in special environment, so it's not written to work the way you want
+this thing only works in special environment, so don't expect it to work the way you want
 
 
 # Example
