@@ -8,6 +8,7 @@
 static const char* HLS = "hls";
 static const char* DASH = "dash";
 static const char* HDS = "hds";
+static const char* MSS = "mss";
 
 static const char *resolution[] = {
     "720",
@@ -262,6 +263,8 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
         p = ngx_sprintf(p, ".urlset/master.m3u8\0");
     } else if (ngx_memcmp(conf->playlist_type.data, HDS, conf->playlist_type.len) == 0) {
         p = ngx_sprintf(p, ".urlset/manifest.f4m\0");
+    } else if (ngx_memcmp(conf->playlist_type.data, MSS, conf->playlist_type.len) == 0) {
+        p = ngx_sprintf(p, ".urlset/manifest\0");
     } else {
         return NGX_HTTP_UNSUPPORTED_MEDIA_TYPE;
     }
