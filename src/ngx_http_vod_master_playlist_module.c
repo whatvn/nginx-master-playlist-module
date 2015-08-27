@@ -7,7 +7,7 @@
 
 static const char* HLS = "hls";
 static const char* DASH = "dash";
-//static const char* HDS = "hds";
+static const char* HDS = "hds";
 
 static const char *resolution[] = {
     "720",
@@ -180,8 +180,8 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
 
     /* change file name to mp4
      * in order to lookup file in filesystem
-    */ 
-    
+     */
+
     char *ext = strrchr((const char *) path.data, '.');
     if (ext == NULL) {
         return NGX_HTTP_BAD_REQUEST;
@@ -234,7 +234,7 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
 
         return rc;
     }
-     
+
 
     if (!of.is_file) {
         if (ngx_close_file(of.fd) == NGX_FILE_ERROR) {
@@ -260,13 +260,16 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
 
     } else if (ngx_memcmp(conf->playlist_type.data, HLS, conf->playlist_type.len) == 0) {
         p = ngx_sprintf(p, ".urlset/master.m3u8\0");
+    } else if (ngx_memcmp(conf->playlist_type.data, HDS, conf->playlist_type.len) == 0) {
+        p = ngx_sprintf(p, ".urlset/manifest.f4m\0");
     } else {
         return NGX_HTTP_UNSUPPORTED_MEDIA_TYPE;
-   }
+    }
     ngx_str_t location;
     location.data = buffer;
     location.len = ngx_strlen(buffer);
     ngx_http_internal_redirect(r, &location, &r->args);
+
     return NGX_HTTP_OK;
 }
 
