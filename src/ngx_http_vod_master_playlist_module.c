@@ -150,51 +150,6 @@ void replace(char * o_string, char * s_string, char * r_string) {
     return replace(o_string, s_string, r_string);
 }
 
-struct vod_bucket_t {
-    ngx_http_request_t *r;
-    ngx_chain_t **chain;
-    uint64_t content_length;
-    ngx_chain_t *first;
-};
-typedef struct vod_bucket_t vod_bucket_t;
-
-extern vod_bucket_t *vod_bucket_init(ngx_http_request_t *r) {
-    vod_bucket_t *bucket = (vod_bucket_t *) ngx_pcalloc(r->pool, sizeof (vod_bucket_t));
-    bucket->r = r;
-    bucket->first = 0;
-    bucket->chain = &bucket->first;
-    bucket->content_length = 0;
-
-    return bucket;
-}
-
-void vod_bucket_insert(vod_bucket_t *bucket, void const *buf, uint64_t size) {
-    ngx_buf_t *b = ngx_pcalloc(bucket->r->pool, sizeof (ngx_buf_t));
-    if (b == NULL) return;
-    b->pos = ngx_pcalloc(bucket->r->pool, size);
-    if (b->pos == NULL) return;
-
-    if (bucket->first != 0) {
-        (*bucket->chain)->buf->last_buf = 0;
-        (*bucket->chain)->buf->last_in_chain = 0;
-        bucket->chain = &(*bucket->chain)->next;
-    }
-    *bucket->chain = ngx_pcalloc(bucket->r->pool, sizeof (ngx_chain_t));
-    if (*bucket->chain == NULL) return;
-
-    b->last = b->pos + size;
-    b->memory = 1;
-    /* use ngx_memcpy instead of memcpy */
-    ngx_memcpy(b->pos, buf, size);
-    b->last_buf = 1;
-    b->last_in_chain = 1;
-
-    (*bucket->chain)->buf = b;
-    (*bucket->chain)->next = NULL;
-
-    bucket->content_length += size;
-}
-
 static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
     size_t root;
     ngx_int_t rc;
