@@ -1,13 +1,9 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
-
-
 
 static const char* HLS = "hls";
 static const char* DASH = "dash";
@@ -206,10 +202,8 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
     ngx_str_t path;
     ngx_open_file_info_t of;
     ngx_http_core_loc_conf_t *clcf;
-    int width = 0;
     unsigned int i;
     vod_playlist_t *conf = ngx_http_get_module_loc_conf(r, ngx_http_vod_master_playlist_module);
-    //    printf("vod location: %s", (char *) conf->vod_location.data);
     if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)))
         return NGX_HTTP_NOT_ALLOWED;
 
@@ -229,8 +223,10 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
 
     ngx_log_t * nlog = r->connection->log;
 
-    // change file name to mp4
-    // in order to lookup file in filesystem
+    /* change file name to mp4
+     * in order to lookup file in filesystem
+    */ 
+    
     char *ext = strrchr((const char *) path.data, '.');
     if (ext == NULL) {
         return NGX_HTTP_BAD_REQUEST;
@@ -292,126 +288,31 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
         }
         return NGX_DECLINED;
     }
-    u_char *buffer = (u_char *) ngx_palloc(r->pool, 1024 * 256);
+    u_char *buffer = (u_char *) ngx_pcalloc(r->pool, 1024 * 256);
     u_char *p = buffer;
-    char mapped_path[100] = ""; // is it too much, but I dont want to use malloc() here
+    char mapped_path[200] = ""; // is it too much, but I dont want to use malloc() here
     ngx_memset(mapped_path, '\0', sizeof (char)*100); /* set all to 0 */
-    if (ngx_memcmp(conf->playlist_type.data, DASH, conf->playlist_type.len) == 0) {
-        strncpy(mapped_path, (char *) path.data, path.len - 4);
-        replace(mapped_path, (char *) clcf->root.data, "");
-        p = ngx_sprintf(p, "/%s%s,.mp4,", (const char *) conf->vod_location.data, mapped_path);
-        for (i = 0; i < 3; i++) {
-            if (ngx_http_vod_playlist_check_file_exist(path, (char *) resolution[i]) == NGX_OK) {
-                p = ngx_sprintf(p, "_%s.mp4,", resolution[i]);
-            }
+    strncpy(mapped_path, (char *) path.data, path.len - 4);
+    replace(mapped_path, (char *) clcf->root.data, "");
+    p = ngx_sprintf(p, "/%s%s,.mp4,", (const char *) conf->vod_location.data, mapped_path);
+    for (i = 0; i < 3; i++) {
+        if (ngx_http_vod_playlist_check_file_exist(path, (char *) resolution[i]) == NGX_OK) {
+            p = ngx_sprintf(p, "_%s.mp4,", resolution[i]);
         }
-        p = ngx_sprintf(p, ".urlset/manifest.mpd\0");
-        ngx_str_t location;
-        location.data = buffer;
-        location.len = ngx_strlen(buffer);
-        ngx_http_internal_redirect(r, &location, &r->args);
-        return NGX_HTTP_OK;
-
-    }/* end dash */
-    else if (ngx_memcmp(conf->playlist_type.data, HLS, conf->playlist_type.len) == 0) {
-        int ret;
-        AVFormatContext *fmt_ctx = NULL;
-        struct vod_bucket_t * bucket = vod_bucket_init(r);
-        if (bucket == NULL) {
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
-        }
-        av_register_all();
-        if ((ret = avformat_open_input(&fmt_ctx, (const char*) path.data, NULL, NULL)) < 0) {
-            if (fmt_ctx) avformat_close_input(&fmt_ctx);
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
-        }
-        if ((ret = avformat_find_stream_info(fmt_ctx, NULL)) < 0) {
-            if (fmt_ctx) avformat_close_input(&fmt_ctx);
-            av_log(NULL, AV_LOG_ERROR, "Cannot find stream information\n");
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
-        }
-
-        for (i = 0; i < fmt_ctx->nb_streams; i++) {
-            AVStream *stream;
-            AVCodecContext *codec_ctx;
-            stream = fmt_ctx->streams[i];
-            codec_ctx = stream->codec;
-            if (codec_ctx->codec_type == AVMEDIA_TYPE_VIDEO) {
-                ngx_log_debug1(NGX_LOG_DEBUG_HTTP, nlog, 0,
-                        "source video w:%d", codec_ctx->width);
-                if (width == 0) {
-                    width = codec_ctx->width;
-                } else if ((width != 0) && (width < codec_ctx->width)) {
-                    // has 2 video streams
-                    width = codec_ctx->width;
-                } else
-                    break;
-            }
-        }
-        avformat_close_input(&fmt_ctx);
-        strncpy(mapped_path, (char *) path.data, path.len - 5);
-        replace(mapped_path, (char *) clcf->root.data, "");
-        //    mapped_path[path.len - 4] = '\0';
-        /* r->uri[len] is 0 */
-
-
-        p = ngx_sprintf(p, "#EXTM3U\n");
-        if (width >= 1920) {
-            if (ngx_http_vod_playlist_check_file_exist(path, "360") == NGX_OK) {
-                p = ngx_sprintf(p, "#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=1560000,RESOLUTION=640x360,CODECS=\"mp4a.40.2, avc1.4d4015\"\n");
-                // http://127.0.0.1/vod/file_360.mp4....
-                p = ngx_sprintf(p, "http://%s/%s/%s_360.mp4/index.m3u8\n", (const char *) conf->vod_host.data, (const char *) conf->vod_location.data, mapped_path);
-            }
-            if (ngx_http_vod_playlist_check_file_exist(path, "480") == NGX_OK) {
-                p = ngx_sprintf(p, "#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=3120000,RESOLUTION=854x480,CODECS=\"mp4a.40.2, avc1.4d4015\"\n");
-                p = ngx_sprintf(p, "http://%s/%s/%s_480.mp4/index.m3u8\n", (const char *) conf->vod_host.data, (const char *) conf->vod_location.data, mapped_path);
-            }
-            if (ngx_http_vod_playlist_check_file_exist(path, "720") == NGX_OK) {
-                p = ngx_sprintf(p, "#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=5120000,RESOLUTION=1280x720,CODECS=\"mp4a.40.2, avc1.4d4015\"\n");
-                p = ngx_sprintf(p, "http://%s/%s/%s_720.mp4/index.m3u8\n", (const char *) conf->vod_host.data, (const char *) conf->vod_location.data, mapped_path);
-            }
-            p = ngx_sprintf(p, "#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=7680000,RESOLUTION=1920x1080,CODECS=\"mp4a.40.2, avc1.4d4015\"\n");
-            p = ngx_sprintf(p, "http://%s/%s/%s.mp4/index.m3u8\n", (const char *) conf->vod_host.data, (const char *) conf->vod_location.data, mapped_path);
-
-        } else if (width >= 1280) {
-            if (ngx_http_vod_playlist_check_file_exist(path, "360") == NGX_OK) {
-                p = ngx_sprintf(p, "#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=1560000,RESOLUTION=640x360,CODECS=\"mp4a.40.2, avc1.4d4015\"\n");
-
-                p = ngx_sprintf(p, "http://%s/%s/%s_360.mp4/index.m3u8\n", (const char *) conf->vod_host.data, (const char *) conf->vod_location.data, mapped_path);
-            }
-            if (ngx_http_vod_playlist_check_file_exist(path, "480") == NGX_OK) {
-                p = ngx_sprintf(p, "#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=3120000,RESOLUTION=854x480,CODECS=\"mp4a.40.2, avc1.4d4015\"\n");
-                p = ngx_sprintf(p, "http://%s/%s/%s_480.mp4/index.m3u8\n", (const char *) conf->vod_host.data, (const char *) conf->vod_location.data, mapped_path);
-            }
-            p = ngx_sprintf(p, "#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=5120000,RESOLUTION=1280x720,CODECS=\"mp4a.40.2, avc1.4d4015\"\n");
-            p = ngx_sprintf(p, "http://%s/%s/%s.mp4/index.m3u8\n", (const char *) conf->vod_host.data, (const char *) conf->vod_location.data, mapped_path);
-
-        } else if (width >= 854) {
-            if (ngx_http_vod_playlist_check_file_exist(path, "360") == NGX_OK) {
-                p = ngx_sprintf(p, "#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=1560000,RESOLUTION=640x360,CODECS=\"mp4a.40.2, avc1.4d4015\"\n");
-
-                p = ngx_sprintf(p, "http://%s/%s/%s_360.mp4/index.m3u8\n", (const char *) conf->vod_host.data, (const char *) conf->vod_location.data, mapped_path);
-            }
-            p = ngx_sprintf(p, "#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=3120000,RESOLUTION=854x480,CODECS=\"mp4a.40.2, avc1.4d4015\"\n");
-            p = ngx_sprintf(p, "http://%s/%s/%s.mp4/index.m3u8\n", (const char *) conf->vod_host.data, (const char *) conf->vod_location.data, mapped_path);
-        } else {
-            p = ngx_sprintf(p, "#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=1560000,RESOLUTION=640x360,CODECS=\"mp4a.40.2, avc1.4d4015\"\n");
-            p = ngx_sprintf(p, "http://%s/%s/%s.mp4/index.m3u8\n", (const char *) conf->vod_host.data, (const char *) conf->vod_location.data, mapped_path);
-        }
-        vod_bucket_insert(bucket, buffer, p - buffer);
-        r->headers_out.status = NGX_HTTP_OK;
-        r->headers_out.content_length_n = bucket->content_length;
-        r->headers_out.last_modified_time = of.mtime;
-        r->headers_out.content_type.len = sizeof ("application/vnd.apple.mpegurl") - 1;
-        r->headers_out.content_type.data = (u_char *) "application/vnd.apple.mpegurl";
-        rc = ngx_http_send_header(r);
-        if (rc == NGX_ERROR || rc > NGX_OK || r->header_only) {
-            ngx_log_error(NGX_LOG_ALERT, r->connection->log, ngx_errno, ngx_close_file_n "ngx_http_send_header failed");
-            return rc;
-        }
-        return ngx_http_output_filter(r, bucket->first);
     }
-    return NGX_HTTP_UNSUPPORTED_MEDIA_TYPE;
+    if (ngx_memcmp(conf->playlist_type.data, DASH, conf->playlist_type.len) == 0) {
+        p = ngx_sprintf(p, ".urlset/manifest.mpd\0");
+
+    } else if (ngx_memcmp(conf->playlist_type.data, HLS, conf->playlist_type.len) == 0) {
+        p = ngx_sprintf(p, ".urlset/master.m3u8\0");
+    } else {
+        return NGX_HTTP_UNSUPPORTED_MEDIA_TYPE;
+   }
+    ngx_str_t location;
+    location.data = buffer;
+    location.len = ngx_strlen(buffer);
+    ngx_http_internal_redirect(r, &location, &r->args);
+    return NGX_HTTP_OK;
 }
 
 static char *ngx_http_vod_playlist(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) {
@@ -419,7 +320,6 @@ static char *ngx_http_vod_playlist(ngx_conf_t *cf, ngx_command_t *cmd, void *con
             ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
 
     clcf->handler = ngx_master_playlist_handler;
-
     return NGX_CONF_OK;
 }
 
