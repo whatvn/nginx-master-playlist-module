@@ -42,7 +42,7 @@ result:
 
 `vod_host`: your domain name
 
-`playlist_type`: hls, dash, mss, hds, default is hls  *and it supports hls and dash by now*
+`playlist_type`: hls, dash, mss, hds, default is hls  *and it supports all right now*
 
 
 
