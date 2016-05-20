@@ -4,11 +4,19 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
+#include <malloc.h>
+
+#define TOKEN_FORMAT "st=%uD~exp=%uD~acl=%V"
+#define HMAC_PARAM "~hmac="
 
 static const char* HLS = "hls";
 static const char* DASH = "dash";
 static const char* HDS = "hds";
 static const char* MSS = "mss";
+
+
 
 static const char *resolution[] = {
     "720",
@@ -22,8 +30,69 @@ typedef struct {
     ngx_str_t playlist_type;
     ngx_str_t vod_host;
     ngx_str_t vod_location;
+    ngx_flag_t vod_akamai_token;
+    ngx_str_t vod_akamai_token_param_name;
+    ngx_uint_t vod_akamai_token_window;
+    ngx_http_complex_value_t *vod_akamai_token_acl;
+    ngx_str_t vod_akamai_token_key;
 } vod_playlist_t;
 
+static int
+ngx_conf_get_hex_char_value(int ch) {
+    if (ch >= '0' && ch <= '9') {
+        return (ch - '0');
+    }
+
+    ch = (ch | 0x20); // lower case
+
+    if (ch >= 'a' && ch <= 'f') {
+        return (ch - 'a' + 10);
+    }
+
+    return -1;
+}
+
+static char *
+ngx_conf_vod_set_hex_str_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_str_t *field;
+	ngx_str_t *value;
+    u_char *p;
+	size_t i;
+	int digit1;
+	int digit2;
+
+    field = (ngx_str_t *) ((u_char*)conf + cmd->offset);
+
+    if (field->data) {
+        return "is duplicate";
+    }
+
+    value = cf->args->elts;
+
+	if (value[1].len & 0x1) {
+		return "length is odd";
+	}
+	
+	field->data = ngx_palloc(cf->pool, value[1].len >> 1);
+	if (field->data == NULL) {
+		return "alloc failed";
+	}
+	p = field->data;
+	
+	for (i = 0; i < value[1].len; i += 2)
+	{
+		digit1 = ngx_conf_get_hex_char_value(value[1].data[i]);
+		digit2 = ngx_conf_get_hex_char_value(value[1].data[i + 1]);
+		if (digit1 < 0 || digit2 < 0) {
+			return "contains non hex chars";
+		}
+		*p++ = (digit1 << 4) | digit2;
+	}
+	field->len = p - field->data;
+
+    return NGX_CONF_OK;
+}
 
 
 static ngx_command_t ngx_http_vod_master_playlist_commands[] = {
@@ -35,21 +104,51 @@ static ngx_command_t ngx_http_vod_master_playlist_commands[] = {
         NULL},
     { ngx_string("playlist_type"),
         NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
-        &ngx_conf_set_str_slot,
+        ngx_conf_set_str_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(vod_playlist_t, playlist_type),
         NULL},
     { ngx_string("vod_location"),
         NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
-        &ngx_conf_set_str_slot,
+        ngx_conf_set_str_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(vod_playlist_t, vod_location),
         NULL},
     { ngx_string("vod_host"),
         NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
-        &ngx_conf_set_str_slot,
+        ngx_conf_set_str_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(vod_playlist_t, vod_host),
+        NULL},
+    { ngx_string("vod_akamai_token"),
+        NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(vod_playlist_t, vod_akamai_token),
+        NULL},
+    { ngx_string("vod_akamai_token_key"),
+        NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
+        ngx_conf_vod_set_hex_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(vod_playlist_t, vod_akamai_token_key),
+        NULL},
+    { ngx_string("vod_akamai_token_param_name"),
+        NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
+        ngx_conf_set_str_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(vod_playlist_t, vod_akamai_token_param_name),
+        NULL},
+    { ngx_string("vod_akamai_token_window"),
+        NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
+        ngx_conf_set_num_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(vod_playlist_t, vod_akamai_token_window),
+        NULL},
+    { ngx_string("vod_akamai_token_acl"),
+        NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
+        ngx_http_set_complex_value_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(vod_playlist_t, vod_akamai_token_acl),
         NULL},
 
     ngx_null_command
@@ -96,17 +195,90 @@ static void *ngx_http_vod_master_playlist_create_location_conf(ngx_conf_t * cf) 
     conf->vod_host.len = 0;
     conf->vod_location.data = NULL;
     conf->vod_location.len = 0;
+    conf->vod_akamai_token = NGX_CONF_UNSET;
+    conf->vod_akamai_token_key.data = NULL;
+    conf->vod_akamai_token_key.len = 0;
+    conf->vod_akamai_token_param_name.data = NULL;
+    conf->vod_akamai_token_param_name.len = 0;
+    conf->vod_akamai_token_window = NGX_CONF_UNSET_UINT;
     return conf;
 }
 
 static char *ngx_http_vod_master_playlist_merge_conf(ngx_conf_t *cf, void *parent, void *child) {
     vod_playlist_t *prev = parent;
     vod_playlist_t *conf = child;
-
+    if (conf->vod_akamai_token_acl == NULL) {
+        conf->vod_akamai_token_acl = prev->vod_akamai_token_acl;
+    }
     ngx_conf_merge_str_value(conf->vod_location, prev->vod_location, "vod");
     ngx_conf_merge_str_value(conf->playlist_type, prev->playlist_type, "hls");
     ngx_conf_merge_str_value(conf->vod_host, prev->vod_host, "localhost");
+    ngx_conf_merge_value(conf->vod_akamai_token, prev->vod_akamai_token, 0);
+    ngx_conf_merge_str_value(conf->vod_akamai_token_key, prev->vod_akamai_token_key, "");
+    ngx_conf_merge_str_value(conf->vod_akamai_token_param_name, prev->vod_akamai_token_param_name, "__hdnea__");
+    ngx_conf_merge_uint_value(conf->vod_akamai_token_window, prev->vod_akamai_token_window, 86400);
     return NGX_CONF_OK;
+}
+
+static void *
+ngx_http_secure_token_memrchr(const u_char *s, int c, size_t n) {
+    const u_char *cp;
+
+    for (cp = s + n; cp > s;) {
+        if (*(--cp) == (u_char) c)
+            return (void*) cp;
+    }
+    return NULL;
+}
+
+static ngx_int_t
+ngx_http_secure_token_set_baseuri(ngx_str_t *uri, ngx_http_variable_value_t *v, uintptr_t data) {
+    u_char* last_slash_pos;
+    u_char* acl_end_pos;
+    u_char* comma_pos;
+
+    last_slash_pos = ngx_http_secure_token_memrchr(uri->data, '/', uri->len);
+    if (last_slash_pos == NULL) {
+        return NGX_ERROR;
+    }
+
+    acl_end_pos = last_slash_pos + 1;
+
+    comma_pos = memchr(uri->data, ',', uri->len);
+    if (comma_pos != NULL) {
+        acl_end_pos = ngx_min(acl_end_pos, comma_pos);
+    }
+
+    v->valid = 1;
+    v->no_cacheable = 0;
+    v->not_found = 0;
+
+    v->len = acl_end_pos - uri->data;
+    v->data = uri->data;
+
+    return NGX_OK;
+}
+
+ngx_int_t
+ngx_http_vod_get_akamai_acl(ngx_http_request_t *r, ngx_http_complex_value_t *acl_conf, ngx_str_t* acl, ngx_str_t* uri) {
+    ngx_http_variable_value_t var_value;
+
+    // get the acl
+    if (acl_conf != NULL) {
+        if (ngx_http_complex_value(r, acl_conf, acl) != NGX_OK) {
+            return NGX_ERROR;
+        }
+    } else {
+        // the default is 'baseuri'
+        if (ngx_http_secure_token_set_baseuri(uri, &var_value, 0) != NGX_OK) {
+            return NGX_ERROR;
+        }
+
+        acl->data = var_value.data;
+        acl->len = var_value.len;
+    }
+
+    return NGX_OK;
 }
 
 void strsncat(char *dest, size_t size, char * strs[], size_t n) {
@@ -138,6 +310,7 @@ int ngx_http_vod_playlist_check_file_exist(ngx_str_t path,
     return NGX_ERROR;
 }
 
+/*
 void replace(char * o_string, char * s_string, char * r_string) {
     char buffer[100];
     char * ch;
@@ -147,11 +320,13 @@ void replace(char * o_string, char * s_string, char * r_string) {
     buffer[ch - o_string] = 0;
     sprintf(buffer + (ch - o_string), "%s%s", r_string, ch + strlen(s_string));
     o_string[0] = 0;
-    strcpy(o_string, buffer);
+    strncpy(o_string, buffer, strlen(buffer));
     return replace(o_string, s_string, r_string);
 }
+*/
 
 static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
+
     size_t root;
     ngx_int_t rc;
     ngx_uint_t level;
@@ -160,6 +335,7 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
     ngx_http_core_loc_conf_t *clcf;
     unsigned int i;
     vod_playlist_t *conf = ngx_http_get_module_loc_conf(r, ngx_http_vod_master_playlist_module);
+    printf("token: %s\n", (const char*) conf->vod_akamai_token_key.data);
     if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)))
         return NGX_HTTP_NOT_ALLOWED;
 
@@ -198,7 +374,7 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
      * option is more distinct
      * I choose option 2 by now, because most production environment just use one of these protocol
      */
-    strcpy(ext, ".mp4");
+    strncpy(ext, ".mp4", 4);
     path.len = ((u_char *) ext - path.data) + 4;
     path.data[path.len] = '\0';
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
@@ -245,33 +421,143 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
         return NGX_DECLINED;
     }
     u_char *buffer = (u_char *) ngx_pcalloc(r->pool, 1024 * 256);
-    u_char *p = buffer;
+    u_char *tmp = buffer;
     char mapped_path[200] = ""; // is it too much, but I dont want to use malloc() here
     ngx_memset(mapped_path, '\0', sizeof (char)*200); /* set all to 0 */
     strncpy(mapped_path, (char *) path.data, path.len - 4);
-    replace(mapped_path, (char *) clcf->root.data, "");
-    p = ngx_sprintf(p, "/%s%s,.mp4,", (const char *) conf->vod_location.data, mapped_path);
+    char* repl = mapped_path;
+    while ((repl = strstr(repl, (char *) clcf->root.data)) != NULL) {
+        char* t = repl;
+        char* s = repl + clcf->root.len;
+        while ((*t++ = *s++));
+    }
+    repl = NULL;
+    if (strcmp((const char*) conf->vod_location.data, "/") > 0) {
+        tmp = ngx_sprintf(tmp, "/%s/,", (const char *) conf->vod_location.data);
+    }
+    tmp = ngx_sprintf(tmp, "%s,.mp4,", mapped_path);
     for (i = 0; i < 3; i++) {
         if (ngx_http_vod_playlist_check_file_exist(path, (char *) resolution[i]) == NGX_OK) {
-            p = ngx_sprintf(p, "_%s.mp4,", resolution[i]);
+            tmp = ngx_sprintf(tmp, "_%s.mp4,", resolution[i]);
         }
     }
     if (ngx_memcmp(conf->playlist_type.data, DASH, conf->playlist_type.len) == 0) {
-        p = ngx_sprintf(p, ".urlset/manifest.mpd\0");
-
+        tmp = ngx_sprintf(tmp, ".urlset/manifest.mpd\0");
     } else if (ngx_memcmp(conf->playlist_type.data, HLS, conf->playlist_type.len) == 0) {
-        p = ngx_sprintf(p, ".urlset/master.m3u8\0");
+        tmp = ngx_sprintf(tmp, ".urlset/master.m3u8\0");
     } else if (ngx_memcmp(conf->playlist_type.data, HDS, conf->playlist_type.len) == 0) {
-        p = ngx_sprintf(p, ".urlset/manifest.f4m\0");
+        tmp = ngx_sprintf(tmp, ".urlset/manifest.f4m\0");
     } else if (ngx_memcmp(conf->playlist_type.data, MSS, conf->playlist_type.len) == 0) {
-        p = ngx_sprintf(p, ".urlset/manifest\0");
+        tmp = ngx_sprintf(tmp, ".urlset/manifest\0");
     } else {
         return NGX_HTTP_UNSUPPORTED_MEDIA_TYPE;
     }
     ngx_str_t location;
     location.data = buffer;
     location.len = ngx_strlen(buffer);
-    ngx_http_internal_redirect(r, &location, &r->args);
+    
+    // now comes akamai token checking
+    if (conf->vod_akamai_token) {
+        time_t current_time = ngx_time();
+        u_char hash[EVP_MAX_MD_SIZE];
+        unsigned hash_len;
+        HMAC_CTX hmac;
+        ngx_str_t signed_part;
+        size_t result_size;
+        ngx_str_t result;
+        result.data = NULL;
+        result.len = 0;
+        u_char* p = NULL;
+        ngx_str_t acl;
+        r->uri = location;
+        rc = ngx_http_vod_get_akamai_acl(r, conf->vod_akamai_token_acl, &acl, &location);
+        if (rc != NGX_OK) {
+            return rc;
+        }
+
+        result_size = conf->vod_akamai_token_param_name.len + 1 + sizeof (TOKEN_FORMAT) + 2 * NGX_INT32_LEN + acl.len + sizeof (HMAC_PARAM) - 1 + EVP_MAX_MD_SIZE * 2 + 1;
+
+        result.data = ngx_pnalloc(r->pool, result_size);
+        if (result.data == NULL) {
+            return NGX_ERROR;
+        }
+        p = ngx_copy(result.data, conf->vod_akamai_token_param_name.data, conf->vod_akamai_token_param_name.len);
+        *p++ = '=';
+
+        signed_part.data = p;
+        p = ngx_sprintf(p, TOKEN_FORMAT, current_time, current_time + conf->vod_akamai_token_window, &acl);
+        
+        signed_part.len = p - signed_part.data;
+        HMAC_CTX_init(&hmac);
+        HMAC_Init(&hmac, conf->vod_akamai_token_key.data, conf->vod_akamai_token_key.len, EVP_sha256());
+        HMAC_Update(&hmac, signed_part.data, signed_part.len);
+        HMAC_Final(&hmac, hash, &hash_len);
+        HMAC_CTX_cleanup(&hmac);
+
+        p = ngx_copy(p, HMAC_PARAM, sizeof (HMAC_PARAM) - 1);
+        p = ngx_hex_dump(p, hash, hash_len);
+
+        result.len = p - result.data;
+        /*
+         *tmp++ = '?';
+        tmp = ngx_copy(tmp, result.data, result.len);
+        location.len = location.len + result.len + 1;
+        tmp = ngx_copy(tmp, args.data, args.len);
+        *tmp = '\0';
+        ngx_log_error(NGX_LOG_ERR, nlog, 0,
+                "akamai built token: %s\n", result.data);
+        printf("Args: %s\n", (const char*) r->args.data);
+        char *token;
+        // duplicate r->args 
+        char *qstrs = strdup((const char*) r->args.data);
+        ngx_str_t args;
+        args.data = r->args.data;
+        args.len = r->args.len;
+        token = strtok(qstrs, " ");
+        while (token != NULL) {
+            printf(" %s\n", token);
+
+            token = strtok(NULL, " ");
+        }
+        printf("Args: %s\n", (const char*) qstrs);
+        repl = (char *) args.data;
+        while ((repl = strstr(repl, qstrs)) != NULL) {
+            char* t = repl;
+            args.len--;
+            char* s = repl + ngx_strlen(qstrs);
+            while ((*t++ = *s++));
+        }
+       
+        printf("Args: %s\n", (const char*) args.data);
+        
+        if (qstrs) free(qstrs);
+       
+        
+        printf("args len: %zu\t result len: %zu\t Location len: %zu\t, strlen: %zu ", location.len, ngx_strlen(location.data), result.len, args.len);
+        p = ngx_copy(p, args.data, args.len);
+        result.len += args.len + 1;
+        *p = '\0';
+        result.len += args.len + 1;
+        printf("result len: %zu\t", result.len);
+        *p = '\0';
+        printf("final args: %s\n", (const char*) result.data);
+        printf("final location: %s\n", (const char*) location.data);
+        r->headers_out.location = ngx_list_push(&r->headers_out.headers);
+        if (r->headers_out.location == NULL) {
+            ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
+        }
+        r->headers_out.location->hash = 1;
+        r->headers_out.location->key.len = sizeof("Location") - 1;
+        r->headers_out.location->key.data = (u_char *) "Location";
+        r->headers_out.location->value.len = location.len;
+        r->headers_out.location->value.data = location.data; 
+        return NGX_HTTP_MOVED_TEMPORARILY; 
+        
+        */
+        ngx_http_internal_redirect(r, &location, &result);
+    } else {
+        ngx_http_internal_redirect(r, &location, &r->args);
+    }
 
     return NGX_HTTP_OK;
 }

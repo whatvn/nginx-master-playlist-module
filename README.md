@@ -1,7 +1,7 @@
 # nginx-master-playlist-module
 
-this thing only works in special environment, so don't expect it to work the way you want
-
+this thing only works in special environment, so it's not written to work the way you want
+it can generate akamai token as query string to access protected location by akamai enabled token
 
 # Example
 
@@ -15,10 +15,10 @@ this thing only works in special environment, so don't expect it to work the way
         }
 ```
 
-then to request master playlist for file name: test3.mp4, test3_480.mp4, test3_360.mp4 do this:
+then to request master playlist, do this:
 
 ```
-$ curl "http:/localhost/master/test3.m3u8"
+$ curl "http:/localhost/test3.m3u8"
 ```
 
 result:
@@ -42,7 +42,13 @@ result:
 
 `vod_host`: your domain name
 
-`playlist_type`: hls, dash, mss, hds, default is hls  *and it supports all right now*
+`playlist_type`: hls, dash, mss, hds, default is hls  *and it supports hls and dash by now*
+
+`vod_akamai_token`: enable akamai token insertion. with this directive, this module will generate akamai token query strings and forward to location with akamai token enabled, to access protected content.
+`vod_akamai_token_key`: secret key (in hex)
+`vod_akamai_token_param_name`: default __hdna__
+`vod_akamai_token_window`: expire time of generated token (default 86400)
+`vod_akamai_token_acl`: akamai token acl, default `baseuri`
 
 
 
