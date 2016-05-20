@@ -11,6 +11,7 @@
 #define TOKEN_FORMAT "st=%uD~exp=%uD~acl=%V"
 #define HMAC_PARAM "~hmac="
 
+
 static const char* HLS = "hls";
 static const char* DASH = "dash";
 static const char* HDS = "hds";
