@@ -74,7 +74,6 @@ ngx_conf_vod_set_hex_str_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 	if (value[1].len & 0x1) {
 		return "length is odd";
 	}
-	
 	field->data = ngx_palloc(cf->pool, value[1].len >> 1);
 	if (field->data == NULL) {
 		return "alloc failed";
@@ -336,7 +335,6 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
     ngx_http_core_loc_conf_t *clcf;
     unsigned int i;
     vod_playlist_t *conf = ngx_http_get_module_loc_conf(r, ngx_http_vod_master_playlist_module);
-    printf("token: %s\n", (const char*) conf->vod_akamai_token_key.data);
     if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)))
         return NGX_HTTP_NOT_ALLOWED;
 
@@ -375,6 +373,10 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
      * option is more distinct
      * I choose option 2 by now, because most production environment just use one of these protocol
      */
+    if (ngx_strncmp(ext, ".mpd", 4) != 0  && ngx_strncmp(ext, ".m3u8", 5) != 0 
+            && ngx_strncmp(ext, ".manifest", 9) != 0 && ngx_strncmp(ext, ".f4m", 4) != 0 ) {
+        return NGX_HTTP_NOT_ALLOWED;
+    }
     strncpy(ext, ".mp4", 4);
     path.len = ((u_char *) ext - path.data) + 4;
     path.data[path.len] = '\0';
@@ -434,7 +436,7 @@ static ngx_int_t ngx_master_playlist_handler(ngx_http_request_t * r) {
     }
     repl = NULL;
     if (strcmp((const char*) conf->vod_location.data, "/") > 0) {
-        tmp = ngx_sprintf(tmp, "/%s/,", (const char *) conf->vod_location.data);
+        tmp = ngx_sprintf(tmp, "%s", (const char *) conf->vod_location.data);
     }
     tmp = ngx_sprintf(tmp, "%s,.mp4,", mapped_path);
     for (i = 0; i < 3; i++) {
