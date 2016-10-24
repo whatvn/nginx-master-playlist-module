@@ -45,9 +45,13 @@ result:
 `playlist_type`: hls, dash, mss, hds, default is hls  *and it supports hls and dash by now*
 
 `vod_akamai_token`: enable akamai token insertion. with this directive, this module will generate akamai token query strings and forward to location with akamai token enabled, to access protected content.
+
 `vod_akamai_token_key`: secret key (in hex)
+
 `vod_akamai_token_param_name`: default __hdna__
+
 `vod_akamai_token_window`: expire time of generated token (default 86400)
+
 `vod_akamai_token_acl`: akamai token acl, default `baseuri`
 
 
